@@ -1,94 +1,179 @@
 using System.Collections;
 using System.Collections.Generic;
-using UnityEngine;
 using Unity.MLAgents;
 using Unity.MLAgents.Actuators;
 using Unity.MLAgents.Sensors;
+using UnityEditor.Timeline.Actions;
+using UnityEngine;
+using UnityEngine.EventSystems;
 
-
-public class SoccerPlayerAgent : Agent
+public class player : Agent
 {
+    public Rigidbody rb;
     public GameObject ball;
     public GameObject goal;
-    public float kickForce = 10f;
-    public float boundaryRadius = 20f;
+    public float kickForce = 0.1f;
+
+    public float speed = 1f;
+
+    public float rotationSpeed = 1f;
+
+    // Environemtn parameters
+    public float environmentSizeX  = 16;
+    public float environmentSizeZ  = 8;
+    //public float boundaryRadius = 1f;
+
+    // private Vector3 startingPosition = new Vector3(0.0f, 0.0f, 0.0f);
+
+    // private enum ACTIONS {
+    //     NOTHING = 0,
+    //     KICKBALL = 1,
+        
+    // }
 
     public override void OnEpisodeBegin()
     {
         // Reset the environment at the beginning of each episode
-        ball.transform.position = new Vector3(0f, 0.5f, 0f);
+        ball.transform.position = new Vector3(4f, 0f, 0f);
         ball.GetComponent<Rigidbody>().velocity = Vector3.zero;
-        ball.GetComponent<Rigidbody>().angularVelocity = Vector3.zero;
+        // ball.GetComponent<Rigidbody>().angularVelocity = Vector3.zero;
 
-        // Randomly place the agent within the circular bounds
+         // Randomly place the agent on the environment
         transform.position = GetRandomPositionInBounds();
     }
 
     public override void CollectObservations(VectorSensor sensor)
     {
-        // Observe the agent's position
-        sensor.AddObservation(transform.position);
+        //Direction of the ball
+        Vector3 directionBall = (ball.transform.position - transform.position).normalized;
+        
+        sensor.AddObservation(directionBall.x);
+        sensor.AddObservation(directionBall.z);
 
-        // Observe the ball's position
-        sensor.AddObservation(ball.transform.position);
+        //Direction of the goal
+        Vector3 directionGoal = (goal.transform.position - transform.position).normalized;
+        sensor.AddObservation(directionGoal.x);
+        sensor.AddObservation(directionGoal.z);
+       
+        // Direction of the agent
+        sensor.AddObservation(transform.forward);
 
-        // Observe the goal's position
-        sensor.AddObservation(goal.transform.position);
+        
     }
+
+    
+    
 
     public override void OnActionReceived(ActionBuffers actions)
     {
-        // Convert continuous actions to discrete actions
-        float moveX = actions.ContinuousActions[0];
-        float moveZ = actions.ContinuousActions[1];
+        // Normal movement based on actions
+        var actionTaken = actions.ContinuousActions;
+        // Kicking the ball based on discrete actions
+        var kickAction = actions.DiscreteActions[0];
 
-        // Apply force to move the agent
-        Vector3 moveForce = new Vector3(moveX, 0f, moveZ);
-        GetComponent<Rigidbody>().AddForce(moveForce * 10f);
+        // Use index 0 for forward movement and index 1 for turning
+        float moveDirection = actionTaken[0];
+        float turnDirection = actionTaken[1];
 
-        // Calculate the distance from the center of the circle
-        float distanceToCenter = Vector3.Distance(Vector3.zero, transform.position);
+        Vector3 moveVector = transform.forward * moveDirection * speed;
+        rb.MovePosition(rb.position + moveVector * Time.fixedDeltaTime);
 
-        // Penalize the agent if it moves outside the circular area
-        if (distanceToCenter > boundaryRadius)
+        float rotation = turnDirection * rotationSpeed * Time.fixedDeltaTime;
+        rb.MoveRotation(rb.rotation * Quaternion.Euler(Vector3.up * rotation));
+
+        // Check if kick action is taken (assuming 1 is the kick action index)
+        if (kickAction == 1)
         {
-            AddReward(-0.1f);
+            KickBall();
         }
+        
 
-        // Kick the ball if the agent is close to it
-        if (Vector3.Distance(transform.position, ball.transform.position) < 1.5f)
+        
+    }
+
+    // Separate method to handle kicking the ball
+    private void KickBall()
+    {
+        float kickRange = 45f;
+        // Implement kicking logic here
+        // For example, apply force to kick the ball
+        if (Vector3.Distance(transform.position, ball.transform.position) < kickRange)
         {
-            Vector3 kickDirection = (goal.transform.position - ball.transform.position).normalized;
-
-            // Kick the ball towards the goal
-            ball.GetComponent<Rigidbody>().AddForce(kickDirection * kickForce, ForceMode.Impulse);
-
-            // Reward the agent for scoring a goal
-            AddReward(1.0f);
-        }
-
-        // Penalize the agent if it misses the goal
-        if (Vector3.Distance(ball.transform.position, goal.transform.position) > 2.5f)
-        {
-            AddReward(-0.1f);
+            Vector3 kickDirection = (ball.transform.position - transform.position).normalized;
+            rb.AddForce(kickDirection * kickForce, ForceMode.Impulse);
         }
     }
+    
 
     public override void Heuristic(in ActionBuffers actionsOut)
     {
-        // Manual control for testing purposes
-        actionsOut.ContinuousActions[0] = Input.GetAxis("Horizontal");
-        actionsOut.ContinuousActions[1] = Input.GetAxis("Vertical");
+        ActionSegment<float> actions = actionsOut.ContinuousActions;
+        ActionSegment<int> discreteActions = actionsOut.DiscreteActions;
+        // Control forward and backward movement
+        float moveInput = 0;
+        if (Input.GetKey("w")) moveInput = 1;
+        else if (Input.GetKey("s")) moveInput = -1;
+
+        // Control turning
+        float turnInput = 0;
+        if (Input.GetKey("d")) turnInput = 1;
+        else if (Input.GetKey("a")) turnInput = -1;
+
+        actions[0] = moveInput;
+        actions[1] = turnInput;
+        // Kick the ball when the space key is pressed (assuming 1 is the kick action index)
+        if (Input.GetKeyDown(KeyCode.Space))
+        {
+            discreteActions[0] = 1;
+        }
+        else
+        {
+            discreteActions[0] = 0;
+        }
+        
     }
 
-    private Vector3 GetRandomPositionInBounds()
+
+    
+    public void OnCollisionEnter(Collision collision)
+    {
+        if (collision.collider.tag == "ball")
+        {
+            
+            AddReward(1f);
+            Debug.Log("COLLIDED WITH BALL");
+            
+
+        }
+
+        
+        if (collision.collider.tag == "wall")
+        {
+            AddReward(-1f);
+            EndEpisode();
+            Debug.Log("COLLIDED WITH WALL");
+
+        }
+
+        if (collision.collider.tag == "goal")
+        {
+            AddReward(-1f);
+            EndEpisode();
+            Debug.Log("COLLIDED WITH THE GOALPOST");
+        }
+
+
+
+    }
+      private Vector3 GetRandomPositionInBounds()
     {
         // Get a random position within the circular bounds
-        float angle = Random.Range(0f, 2f * Mathf.PI);
-        float radius = Random.Range(0f, boundaryRadius);
-        float x = radius * Mathf.Cos(angle);
-        float z = radius * Mathf.Sin(angle);
+        
+        float x = Random.Range(-environmentSizeX / 2, environmentSizeX / 2);
+        float z = Random.Range(-environmentSizeZ / 2, environmentSizeZ / 2);
+        return new Vector3(x, -0.6f, z);
+        
 
-        return new Vector3(x, 0.5f, z);
+        
     }
 }
